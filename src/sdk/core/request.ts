@@ -83,3 +83,10 @@ export const platformApi = {
 		return platformRequest(url, { ...options, method: "DELETE" });
 	},
 };
+
+
+import { approveClaimController } from "./approveClaimController";
+
+export async function approveClaimRequest(claimId: string) {
+  return await approveClaimController(claimId);
+}

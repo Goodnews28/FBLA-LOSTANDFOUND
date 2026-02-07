@@ -474,6 +474,33 @@ export class ClaimORM {
     return this.resultToData(response.data?.values || []);
   }
 
+    /**
+   * Approve a claim by ID
+   * Sets claim_status to Approved
+   */
+  async approveClaimById(id: string): Promise<ClaimModel> {
+    // Fetch existing claim
+    const existing = await this.getClaimById(id);
+
+    if (!existing || existing.length === 0) {
+      throw new Error("Claim not found");
+    }
+
+    const claim = existing[0];
+
+    // Update claim status
+    const updatedClaim: ClaimModel = {
+      ...claim,
+      claim_status: ClaimClaimStatus.Approved,
+    };
+
+    // Persist update
+    const result = await this.setClaimById(id, updatedClaim);
+
+    return result[0];
+  }
+
+
   /**
    * Set (update) claim by ItemId index
    * This function replaces data, so the data must be complete.
