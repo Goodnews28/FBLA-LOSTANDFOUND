@@ -15,7 +15,6 @@ import { Search, Package, CheckCircle, Info, LogOut, X } from "lucide-react";
 import { LostItemORM, LostItemCategory, LostItemStatus, type LostItemModel } from "@/sdk/database/orm/orm_lost_item";
 import { ClaimORM, ClaimClaimStatus, type ClaimModel } from "@/sdk/database/orm/orm_claim";
 import { AdminORM, type AdminModel } from "@/sdk/database/orm/orm_admin";
-import { request as sendEmail } from "@/sdk/mcp-clients/686de5276fd1cae1afbb55be/GMAIL_SEND_EMAIL";
 
 export const Route = createFileRoute("/")({
 	component: App,
@@ -798,13 +797,23 @@ function PendingReportsSection() {
 				console.error("Failed to delete from database:", err);
 			}
 
-			// Try to send email
+			const apiKey = import.meta.env.VITE_ADMIN_API_KEY;
+			const emailHeaders: Record<string, string> = { "Content-Type": "application/json" };
+			if (apiKey) {
+				emailHeaders["x-api-key"] = apiKey;
+			}
+
+			// Try to send email via backend
 			try {
 				if (item.finder_email) {
-					await sendEmail({
-						recipient_email: item.finder_email,
-						subject: "Lost & Found: Item Report Declined",
-						body: `Automated Message. Your found item report for "${item.item_name}" has been declined and will not be published. If you have questions, please contact the front desk.`,
+					await fetch("/api/send-email", {
+						method: "POST",
+						headers: emailHeaders,
+						body: JSON.stringify({
+							to: item.finder_email,
+							subject: "Lost & Found: Item Report Declined",
+							body: `Automated Message. Your found item report for "${item.item_name}" has been declined and will not be published. If you have questions, please contact the front desk.`,
+						}),
 					});
 				}
 			} catch (err) {
@@ -1147,45 +1156,33 @@ function PickupRequestsSection() {
 				console.error("Failed to update item status in localStorage:", err);
 			}
 
-			// Try to update DB and send email via MCP; on failure, store notification in localStorage
-			try {
-				const claimORM = ClaimORM.getInstance();
-				const itemORM = LostItemORM.getInstance();
-				const updatedClaimDb = { ...claim, claim_status: action === "approve" ? ClaimClaimStatus.Approved : ClaimClaimStatus.Declined };
-				await claimORM.setClaimById(claim.id, updatedClaimDb);
-
-				if (action === "approve") {
-					const claimedItems = await itemORM.getLostItemByIDs([claim.item_id]);
-					if (claimedItems[0]) {
-						const updatedItem = { ...claimedItems[0], status: LostItemStatus.Claimed };
-						await itemORM.setLostItemById(claim.item_id, updatedItem);
-					}
-				}
-			} catch (err) {
-				console.error("Failed to update claim/item in DB:", err);
+			const apiKey = import.meta.env.VITE_ADMIN_API_KEY;
+			const claimHeaders: Record<string, string> = { "Content-Type": "application/json" };
+			if (apiKey) {
+				claimHeaders["x-api-key"] = apiKey;
 			}
 
-			const item = items.find((i) => i.id === claim.item_id);
-			const itemName = item?.item_name || "your requested item";
-
-			const emailBody = action === "approve"
-				? `Your request to pick up ${itemName} has been approved. This is an automated message. Do not reply.`
-				: `Your request to pick up ${itemName} has been declined. This is an automated message. Do not reply.`;
-
-			const emailPayload = {
-				recipient_email: claim.student_email,
-				subject: `Lost & Found: Pickup Request ${action === "approve" ? "Approved" : "Declined"}`,
-				body: emailBody,
-				user_id: "wolfyiscul@gmail.com",
-			};
-
+			// Try to update DB and send email via backend; on failure, store notification in localStorage
 			try {
-				await sendEmail(emailPayload);
+				await fetch("/api/approve-claim", {
+					method: "POST",
+					headers: claimHeaders,
+					body: JSON.stringify({
+						claimId: claim.id,
+						action,
+					}),
+				});
 			} catch (err) {
-				console.error("Failed to send email via MCP, saving notification locally:", err);
+				console.error("Failed to send email via backend, saving notification locally:", err);
 				try {
 					const notifs = JSON.parse(localStorage.getItem("email_notifications") || "[]");
-					notifs.push({ to: claim.student_email, subject: emailPayload.subject, body: emailPayload.body, status: "pending" });
+					const item = items.find((i) => i.id === claim.item_id);
+					const itemName = item?.item_name || "your requested item";
+					const emailBody = action === "approve"
+						? `Your request to pick up ${itemName} has been approved. This is an automated message. Do not reply.`
+						: `Your request to pick up ${itemName} has been declined. This is an automated message. Do not reply.`;
+					const subject = `Lost & Found: Pickup Request ${action === "approve" ? "Approved" : "Declined"}`;
+					notifs.push({ to: claim.student_email, subject, body: emailBody, status: "pending" });
 					localStorage.setItem("email_notifications", JSON.stringify(notifs));
 				} catch (e) {
 					console.error("Failed to save email notification:", e);
